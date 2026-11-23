@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EventChecking v0.2 - Realtime</title>
+    <style>
+        :root { font-family: system-ui, sans-serif; color: #17212c; background: #f3f5f7; }
+        * { box-sizing: border-box; }
+        body { margin: 0; }
+        header { padding: 30px max(20px, calc((100% - 950px)/2)); background: #143b38; color: white; }
+        header h1 { margin: 0 0 8px; font-size: 28px; }
+        header p { margin: 0; opacity: .85; }
+        main { max-width: 950px; margin: 28px auto; padding: 0 20px 30px; display: grid; gap: 20px; }
+        section { background: white; border: 1px solid #dbe2e7; border-radius: 12px; padding: 22px; }
+        h2 { margin: 0 0 16px; font-size: 20px; }
+        .connection { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+        .dot { width: 10px; height: 10px; border-radius: 100%; background: #c2852f; }
+        .dot.connected { background: #218765; }
+        .dot.disconnected { background: #c44848; }
+        form { display: grid; gap: 12px; }
+        label { display: grid; gap: 5px; font-weight: 600; font-size: 14px; }
+        input { padding: 11px; border: 1px solid #becbd2; border-radius: 7px; font: inherit; }
+        button { border: 0; border-radius: 7px; background: #11765b; color: white; padding: 11px 16px; font: inherit; font-weight: 600; cursor: pointer; width: fit-content; }
+        button:hover { background: #0c5d47; }
+        button:disabled { opacity: .55; cursor: not-allowed; }
+        .layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; }
+        .list { display: grid; gap: 10px; }
+        .event { padding: 12px; background: #f7f9fa; border: 1px solid #e0e6e9; border-radius: 8px; }
+        .event strong { display: block; margin-bottom: 5px; }
+        .event small { color: #506171; }
+        .muted { color: #566674; font-size: 14px; }
+        .message { min-height: 21px; font-size: 14px; margin: 8px 0 0; }
+        .log { max-height: 230px; overflow: auto; white-space: pre-wrap; font-family: Consolas, monospace; font-size: 12px; line-height: 1.5; background: #101d25; color: #ddf5e9; padding: 14px; border-radius: 8px; margin: 0; }
+        @media (max-width: 720px) { .layout { grid-template-columns: 1fr; } }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>EventChecking <span>v0.2</span></h1>
+        <p>REST API + SignalR - Thong bao su kien theo thoi gian thuc</p>
+    </header>
+    <main>
+        <section>
+            <div class="connection"><span id="dot" class="dot"></span><span id="connectionStatus">Dang ket noi SignalR...</span></div>
+            <p class="muted">Mo trang nay trong hai tab. Tao su kien o tab A va quan sat tab B tu cap nhat.</p>
+        </section>
+        <div class="layout">
+            <section>
+                <h2>Tao su kien</h2>
+                <form id="eventForm">
+                    <label>Ten su kien<input id="name" type="text" required maxlength="120" placeholder="Vi du: Hoi thao AI 2026"></label>
+                    <label>Mo ta<input id="description" type="text" placeholder="Noi dung su kien"></label>
+                    <label>Suc chua<input id="capacity" type="number" min="1" required value="50"></label>
+                    <button id="submitButton" type="submit">Tao su kien</button>
+                </form>
+                <p id="formMessage" class="message" role="status"></p>
+            </section>
+            <section>
+                <h2>Danh sach su kien (<span id="count">0</span>)</h2>
+                <div id="eventList" class="list"><p class="muted">Dang tai du lieu...</p></div>
+            </section>
+        </div>
+        <section>
+            <h2>Nhat ky realtime</h2>
+            <pre id="log" class="log" aria-live="polite"></pre>
+        </section>
+    </main>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/8.0.7/signalr.min.js"></script>
+    <script>
+        const form = document.getElementById("eventForm");
+        const formMessage = document.getElementById("formMessage");
+        const connectionStatus = document.getElementById("connectionStatus");
+        const dot = document.getElementById("dot");
+        const log = document.getElementById("log");
+        const eventList = document.getElementById("eventList");
+        const count = document.getElementById("count");
+
+        function setStatus(message, status) {
+            connectionStatus.textContent = message;
+            dot.className = "dot " + status;
+        }
+
+        function writeLog(message) {
+            log.textContent += `[${new Date().toLocaleTimeString("vi-VN")}] ${message}\n`;
+            log.scrollTop = log.scrollHeight;
+        }
+
+        async function loadEvents() {
+            try {
+                const response = await fetch("/events");
+                if (!response.ok) throw new Error("GET /events: " + response.status);
+                const events = await response.json();
+                count.textContent = events.length;
+                eventList.replaceChildren();
+                for (const eventItem of events) {
+                    const card = document.createElement("article");
+                    card.className = "event";
+                    const title = document.createElement("strong");
+                    title.textContent = `#${eventItem.id} - ${eventItem.name}`;
+                    const description = document.createElement("div");
+                    description.textContent = eventItem.description || "Khong co mo ta";
+                    const capacity = document.createElement("small");
+                    capacity.textContent = `Suc chua: ${eventItem.capacity}`;
+                    card.append(title, description, capacity);
+                    eventList.append(card);
+                }
+            } catch (error) {
+                writeLog("Loi tai su kien: " + error.message);
+            }
+        }
+
+        form.addEventListener("submit", async event => {
+            event.preventDefault();
+            const button = document.getElementById("submitButton");
+            button.disabled = true;
+            formMessage.textContent = "Dang tao su kien...";
+            try {
+                const payload = {
+                    name: document.getElementById("name").value,
+                    description: document.getElementById("description").value,
+                    capacity: Number(document.getElementById("capacity").value)
+                };
+                const response = await fetch("/events", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload)
+                });
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.message || "HTTP " + response.status);
+                formMessage.textContent = `Da tao su kien #${data.id} thanh cong.`;
+                form.reset();
+                await loadEvents();
+            } catch (error) {
+                formMessage.textContent = "Loi: " + error.message;
+            } finally {
+                button.disabled = false;
+            }
+        });
+
+        async function connectRealtime() {
+            if (typeof signalR === "undefined") {
+                setStatus("Khong tai duoc SignalR client (kiem tra Internet)", "disconnected");
+                writeLog("SignalR client chua duoc tai tu CDN");
+                await loadEvents();
+                return;
+            }
+
+            const connection = new signalR.HubConnectionBuilder()
+                .withUrl("/hubs/events")
+                .withAutomaticReconnect()
+                .build();
+
+            connection.on("EventCreated", eventItem => {
+                writeLog(`EventCreated: #${eventItem.id} - ${eventItem.name}`);
+                loadEvents();
+            });
+
+            connection.onreconnecting(() => setStatus("Dang ket noi lai...", ""));
+            connection.onreconnected(async () => {
+                setStatus("SignalR da ket noi lai", "connected");
+                writeLog("Ket noi duoc khoi phuc");
+                await loadEvents();
+            });
+            connection.onclose(() => setStatus("SignalR da ngat ket noi", "disconnected"));
+
+            try {
+                await connection.start();
+                setStatus("SignalR da ket noi", "connected");
+                writeLog("Da ket noi /hubs/events");
+            } catch (error) {
+                setStatus("Khong the ket noi SignalR", "disconnected");
+                writeLog("Loi SignalR: " + error.message);
+            }
+            await loadEvents();
+        }
+
+        connectRealtime();
+    </script>
+</body>
+</html>
